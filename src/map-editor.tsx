@@ -24,6 +24,11 @@ import { PlainNode } from './md-tree';
 import { MdNodeData, NODE_TYPE, layoutTree } from './tree-layout';
 import { addChild, addSiblingAfter, moveInto, moveSibling, remove, rename } from './tree-ops';
 
+export interface ResolvedMedia {
+    src: string;
+    kind: 'image' | 'video';
+}
+
 export interface MapEditorHandle {
     reload(root: PlainNode): void;
     fit(): Promise<boolean>;
@@ -35,10 +40,15 @@ interface MapEditorProps {
     root: PlainNode;
     onChange(root: PlainNode, source: string): void;
     onReady(handle: MapEditorHandle): void;
+    /** Turns an embed link into something the node can show; null hides it. */
+    resolveMedia?(link: string): ResolvedMedia | null;
+    onOpenMedia?(link: string): void;
 }
 
 interface EditorNodeData extends MdNodeData {
     editing: boolean;
+    resolved: Array<ResolvedMedia & { link: string }>;
+    onOpenMedia?(link: string): void;
     onCommit(id: string, title: string): void;
     onCancel(): void;
 }
@@ -94,6 +104,26 @@ function MdNode({ id, data, selected }: NodeProps<EditorNode>) {
                 <>
                     <span className="poc-rf-title">{data.label}</span>
                     {data.preview && data.depth > 0 && <span className="poc-rf-preview">{data.preview}</span>}
+                    {data.resolved.length > 0 && (
+                        <span className="poc-rf-media">
+                            {data.resolved.map(item =>
+                                item.kind === 'video' ? (
+                                    <video key={item.link} className="poc-rf-thumb" src={item.src} controls preload="metadata" />
+                                ) : (
+                                    <img
+                                        key={item.link}
+                                        className="poc-rf-thumb"
+                                        src={item.src}
+                                        alt={item.link}
+                                        onClick={e => {
+                                            e.stopPropagation();
+                                            data.onOpenMedia?.(item.link);
+                                        }}
+                                    />
+                                ),
+                            )}
+                        </span>
+                    )}
                 </>
             )}
         </div>
@@ -102,7 +132,7 @@ function MdNode({ id, data, selected }: NodeProps<EditorNode>) {
 
 const nodeTypes = { [NODE_TYPE]: MdNode };
 
-function Editor({ root: initialRoot, onChange, onReady }: MapEditorProps) {
+function Editor({ root: initialRoot, onChange, onReady, resolveMedia, onOpenMedia }: MapEditorProps) {
     const flow = useReactFlow<EditorNode>();
     const rootRef = useRef(initialRoot);
     const past = useRef<PlainNode[]>([]);
@@ -119,12 +149,22 @@ function Editor({ root: initialRoot, onChange, onReady }: MapEditorProps) {
                 laid.nodes.map(node => ({
                     ...node,
                     selected: node.id === selectedId.current,
-                    data: { ...node.data, editing: false, onCommit, onCancel },
+                    data: {
+                        ...node.data,
+                        editing: false,
+                        onCommit,
+                        onCancel,
+                        onOpenMedia,
+                        resolved: (node.data.media ?? [])
+                            .map(link => ({ link, resolved: resolveMedia?.(link) ?? null }))
+                            .filter(item => item.resolved !== null)
+                            .map(item => ({ link: item.link, ...item.resolved! })),
+                    },
                 })),
             );
             setEdges(laid.edges);
         },
-        [setNodes, setEdges],
+        [setNodes, setEdges, resolveMedia, onOpenMedia],
     );
 
     useEffect(() => {

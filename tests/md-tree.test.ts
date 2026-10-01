@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { mapRoot, parseMarkdown, reconcile, serializeMarkdown, PlainNode } from '../src/md-tree';
+import { mapRoot, mediaLinks, parseMarkdown, reconcile, serializeMarkdown, PlainNode } from '../src/md-tree';
 
 const CANAL = [
     '# Canal',
@@ -247,5 +247,23 @@ describe('md-tree list items', () => {
         find(root, 'alpha')!.children.push({ id: 'i1', title: 'beta', children: [] });
         const out = serializeMarkdown(reconcile(tree, root));
         expect(out).to.contain('## Other\n- alpha\n  - beta\n\n### Sub\n');
+    });
+});
+
+describe('md-tree media', () => {
+    it('lists the embeds of a body and leaves them out of the preview', () => {
+        expect(mediaLinks(['![[a/b.png]]', 'text ![alt](https://x.y/c.jpg "t") more', '![[clip.mp4|200]]', '[[not an embed]]']))
+            .to.deep.equal(['a/b.png', 'https://x.y/c.jpg', 'clip.mp4']);
+        const root = mapRoot(parseMarkdown('# N\n\n## A\n![[shot.png]]\nafter the image\n'), 'n');
+        expect(find(root, 'A')!.media).to.deep.equal(['shot.png']);
+        expect(find(root, 'A')!.preview).to.equal('after the image');
+    });
+
+    it('finds the screenshot embed under heading 4 of story.md', () => {
+        const fs = require('fs');
+        const story: string = fs.readFileSync(__dirname + '/fixtures-story.md', 'utf8');
+        const root = mapRoot(parseMarkdown(story), 'story');
+        const conflict = find(root, '4) the protagonist main story conflict')!;
+        expect(conflict.media).to.deep.equal(['1.projects/1.personal/utube/_files/Screenshot 2026-10-01 at 2.37.40 PM.png']);
     });
 });

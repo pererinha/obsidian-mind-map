@@ -60,6 +60,8 @@ export interface PlainNode {
     kind?: NodeKind;
     /** First line of the node's body, for display only. */
     preview?: string;
+    /** Embeds in the body, as written: the link target of ![[file]] or ![alt](url). */
+    media?: string[];
 }
 
 export interface ParseOptions {
@@ -71,6 +73,7 @@ const HEADING_RE = /^(#{1,6})(?:\s+(.*))?$/;
 const LIST_ITEM_RE = /^(\s*)([-*+]|\d+[.)])\s(.*)$/;
 const FENCE_RE = /^(```|~~~)/;
 const PREVIEW_MAX = 60;
+const EMBED_RE = /!\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]|!\[[^\]]*\]\(([^)\s]+)[^)]*\)/g;
 
 let idCounter = 0;
 export function nextId(): string {
@@ -261,9 +264,31 @@ export function mapRoot(tree: MdTree, fallbackTitle: string): PlainNode {
 }
 
 export function toPlain(node: MdNode): PlainNode {
-    const firstLine = node.body.find(line => line.trim() !== '')?.trim();
+    const media = mediaLinks(node.body);
+    const firstLine = node.body.find(line => line.trim() !== '' && mediaLinks([line]).length === 0)?.trim();
     const preview = firstLine && firstLine.length > PREVIEW_MAX ? `${firstLine.slice(0, PREVIEW_MAX - 1).trimEnd()}…` : firstLine;
-    return { id: node.id, title: node.title, kind: node.kind, preview, children: node.children.map(toPlain) };
+    return {
+        id: node.id,
+        title: node.title,
+        kind: node.kind,
+        preview,
+        media: media.length > 0 ? media : undefined,
+        children: node.children.map(toPlain),
+    };
+}
+
+/** Link targets of the image and video embeds in the lines, in order. */
+export function mediaLinks(lines: string[]): string[] {
+    const links: string[] = [];
+    for (const line of lines) {
+        EMBED_RE.lastIndex = 0;
+        let match = EMBED_RE.exec(line);
+        while (match) {
+            links.push((match[1] ?? match[2]).trim());
+            match = EMBED_RE.exec(line);
+        }
+    }
+    return links;
 }
 
 function indexNodes(node: MdNode, into: Map<string, MdNode>): void {

@@ -3,7 +3,7 @@ import { createRoot, Root } from 'react-dom/client';
 import reactFlowCss from '@xyflow/react/dist/style.css';
 import { EditorSync, injectCss, whenSized } from './editor-sync';
 import { PlainNode } from './md-tree';
-import { MapEditor, MapEditorHandle } from './map-editor';
+import { MapEditor, MapEditorHandle, ResolvedMedia } from './map-editor';
 import { MindMapSettings } from './settings';
 
 export const RF_VIEW_TYPE = 'poc-react-flow';
@@ -77,9 +77,24 @@ export default class ReactFlowView extends ItemView {
                 root={root}
                 onChange={(next: PlainNode, source: string) => this.commit(next, source)}
                 onReady={handle => (this.editor = handle)}
+                resolveMedia={link => this.resolveMedia(link)}
+                onOpenMedia={link => this.app.workspace.openLinkText(link, this.filePath, true)}
             />,
         );
         this.sync.watch();
+    }
+
+    /** Vault embeds resolve through the metadata cache; http(s) links are used as they are. */
+    private resolveMedia(link: string): ResolvedMedia | null {
+        const kind = /\.(mp4|webm|mov|ogv|m4v)$/i.test(link) ? 'video' : /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(link) ? 'image' : null;
+        if (!kind) {
+            return null;
+        }
+        if (/^https?:\/\//.test(link)) {
+            return { src: link, kind };
+        }
+        const file = this.app.metadataCache.getFirstLinkpathDest(link, this.filePath);
+        return file ? { src: this.app.vault.getResourcePath(file), kind } : null;
     }
 
     /** Writes the tree and shows the editor what was written (reconcile may reorder list items before headings). */

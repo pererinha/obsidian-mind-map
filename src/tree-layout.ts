@@ -31,6 +31,8 @@ export interface MdNodeData extends Record<string, unknown> {
     kind?: NodeKind;
     /** First line of the node's body, shown dimmed under the title. */
     preview?: string;
+    /** Embed links of the node's body; the editor resolves them to thumbnails. */
+    media?: string[];
     /** Title cut to LABEL_MAX characters for the canvas; the full title goes to the tooltip and the editor. */
     label: string;
     depth: number;
@@ -48,6 +50,8 @@ const NODE_HEIGHT = 36;
 const PREVIEW_HEIGHT = 14;
 const PREVIEW_CHAR_WIDTH = 6.5;
 const PREVIEW_MAX_WIDTH = 240;
+export const THUMB_WIDTH = 160;
+export const THUMB_HEIGHT = 120;
 const ROOT_SIZE = 84;
 const GAP_X = 60;
 const GAP_Y = 16;
@@ -57,14 +61,19 @@ export function shortLabel(title: string): string {
 }
 
 /** Estimated box size before the node is measured. */
-export function estimateSize(title: string, depth: number, preview?: string): { width: number; height: number } {
+export function estimateSize(title: string, depth: number, preview?: string, media?: string[]): { width: number; height: number } {
     if (depth === 0) {
         const side = Math.max(ROOT_SIZE, Math.round(shortLabel(title).length * CHAR_WIDTH + PADDING_X));
         return { width: side, height: side };
     }
     const titleWidth = Math.round(shortLabel(title).length * CHAR_WIDTH + PADDING_X);
     const previewWidth = preview ? Math.min(PREVIEW_MAX_WIDTH, Math.round(preview.length * PREVIEW_CHAR_WIDTH + PADDING_X)) : 0;
-    return { width: Math.max(60, titleWidth, previewWidth), height: preview ? NODE_HEIGHT + PREVIEW_HEIGHT : NODE_HEIGHT };
+    const mediaHeight = media && media.length > 0 ? THUMB_HEIGHT + 6 : 0;
+    const mediaWidth = media && media.length > 0 ? Math.min(media.length, 2) * (THUMB_WIDTH + 6) + PADDING_X : 0;
+    return {
+        width: Math.max(60, titleWidth, previewWidth, mediaWidth),
+        height: (preview ? NODE_HEIGHT + PREVIEW_HEIGHT : NODE_HEIGHT) + mediaHeight,
+    };
 }
 
 interface Branch {
@@ -83,7 +92,7 @@ function layoutSide(root: PlainNode, branches: Branch[], side: Side): { nodes: M
     const columnWidth: number[] = [];
 
     const measure = (node: PlainNode, depth: number) => {
-        columnWidth[depth] = Math.max(columnWidth[depth] ?? 0, estimateSize(node.title, depth, node.preview).width);
+        columnWidth[depth] = Math.max(columnWidth[depth] ?? 0, estimateSize(node.title, depth, node.preview, node.media).width);
         node.children.forEach(child => measure(child, depth + 1));
     };
     branches.forEach(branch => measure(branch.node, 1));
@@ -97,11 +106,13 @@ function layoutSide(root: PlainNode, branches: Branch[], side: Side): { nodes: M
     let nextRow = 0;
     /** Places the subtree and returns the node's centre y. */
     const place = (node: PlainNode, depth: number, color: string, parent: PlainNode): number => {
-        const size = estimateSize(node.title, depth, node.preview);
+        const size = estimateSize(node.title, depth, node.preview, node.media);
         let centerY: number;
         if (node.children.length === 0) {
-            centerY = nextRow * (NODE_HEIGHT + GAP_Y) + NODE_HEIGHT / 2;
-            nextRow += 1;
+            // A tall node takes as many rows as it needs.
+            const rows = Math.max(1, Math.ceil((size.height + GAP_Y) / (NODE_HEIGHT + GAP_Y)));
+            centerY = nextRow * (NODE_HEIGHT + GAP_Y) + (rows * (NODE_HEIGHT + GAP_Y) - GAP_Y) / 2;
+            nextRow += rows;
         } else {
             const centers = node.children.map(child => place(child, depth + 1, color, node));
             centerY = (centers[0] + centers[centers.length - 1]) / 2;
@@ -111,7 +122,7 @@ function layoutSide(root: PlainNode, branches: Branch[], side: Side): { nodes: M
             id: node.id,
             type: NODE_TYPE,
             position: { x, y: centerY - size.height / 2 },
-            data: { title: node.title, label: shortLabel(node.title), kind: node.kind, preview: node.preview, depth, side, color },
+            data: { title: node.title, label: shortLabel(node.title), kind: node.kind, preview: node.preview, media: node.media, depth, side, color },
             ...size,
         });
         edges.push({
