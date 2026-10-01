@@ -30,7 +30,9 @@ export default {
     // React and React Flow read process.env.NODE_ENV; Obsidian has no process.env.
     replace({ 'process.env.NODE_ENV': JSON.stringify('production'), preventAssignment: true }),
     typescript(),
-    nodeResolve({browser: true}),
+    // markmap (d3 v6) and React Flow pull different d3-selection majors; d3-transition
+    // patches only one Selection prototype, so a single copy is required for zoom to work.
+    nodeResolve({browser: true, dedupe: ['d3-selection']}),
     commonjs(),
     json(),
     copy({
