@@ -10,6 +10,7 @@ import { MindMapSettings } from './settings';
 import { MindMapSettingsTab } from './settings-tab';
 import MindElixirView, { ME_VIEW_TYPE } from './mind-elixir-view';
 import SimpleMindMapView, { SMM_VIEW_TYPE } from './simple-mind-map-view';
+import ReactFlowView, { RF_VIEW_TYPE } from './react-flow-view';
 
   
   export default class MindMap extends Plugin {
@@ -49,6 +50,7 @@ import SimpleMindMapView, { SMM_VIEW_TYPE } from './simple-mind-map-view';
       // POC: editable mind maps backed by the note's headings.
       this.registerView(ME_VIEW_TYPE, (leaf: WorkspaceLeaf) => new MindElixirView(leaf));
       this.registerView(SMM_VIEW_TYPE, (leaf: WorkspaceLeaf) => new SimpleMindMapView(leaf));
+      this.registerView(RF_VIEW_TYPE, (leaf: WorkspaceLeaf) => new ReactFlowView(leaf));
       this.addCommand({
         id: 'poc-edit-mind-elixir',
         name: 'POC: Edit current note as mind map (Mind Elixir)',
@@ -58,6 +60,11 @@ import SimpleMindMapView, { SMM_VIEW_TYPE } from './simple-mind-map-view';
         id: 'poc-edit-simple-mind-map',
         name: 'POC: Edit current note as mind map (SimpleMindMap)',
         callback: () => this.openPocEditor(SMM_VIEW_TYPE),
+      });
+      this.addCommand({
+        id: 'poc-edit-react-flow',
+        name: 'POC: Edit current note as mind map (React Flow)',
+        callback: () => this.openPocEditor(RF_VIEW_TYPE),
       });
 
     }
