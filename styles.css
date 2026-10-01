@@ -75,3 +75,11 @@
     min-width: 80px;
     color: var(--text-normal);
 }
+.poc-rf-panel {
+    display: flex;
+    gap: 4px;
+}
+.poc-rf-organize {
+    font-size: 12px;
+    padding: 2px 8px;
+}

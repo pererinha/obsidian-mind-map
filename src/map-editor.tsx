@@ -11,6 +11,7 @@ import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
     Background,
     Handle,
+    Panel,
     Position,
     ReactFlow,
     ReactFlowProvider,
@@ -20,8 +21,8 @@ import {
     useReactFlow,
 } from '@xyflow/react';
 import type { Edge, Node, NodeProps, OnNodeDrag, OnSelectionChangeFunc, ReactFlowInstance } from '@xyflow/react';
-import { PlainNode } from './md-tree';
-import { MdNodeData, NODE_TYPE, layoutTree } from './tree-layout';
+import { PlainNode, XY } from './md-tree';
+import { Layout, MdNodeData, NODE_TYPE, layoutTree } from './tree-layout';
 import { addChild, addSiblingAfter, moveInto, moveSibling, remove, rename } from './tree-ops';
 
 export interface ResolvedMedia {
@@ -30,7 +31,10 @@ export interface ResolvedMedia {
 }
 
 export interface MapEditorHandle {
-    reload(root: PlainNode): void;
+    /** Shows a tree read from the file, with the file's saved positions. */
+    reload(root: PlainNode, positions?: Record<string, XY>): void;
+    /** Recomputes every position in the given layout and forgets the saved ones. */
+    organize(layout: Layout): void;
     fit(): Promise<boolean>;
     /** The React Flow instance, for scripts that drive the view. */
     instance: ReactFlowInstance<EditorNode>;
@@ -38,7 +42,9 @@ export interface MapEditorHandle {
 
 interface MapEditorProps {
     root: PlainNode;
-    onChange(root: PlainNode, source: string): void;
+    /** Saved positions by node id. */
+    positions?: Record<string, XY>;
+    onChange(root: PlainNode, source: string, positions: Record<string, XY>): void;
     onReady(handle: MapEditorHandle): void;
     /** Turns an embed link into something the node can show; null hides it. */
     resolveMedia?(link: string): ResolvedMedia | null;
@@ -132,9 +138,17 @@ function MdNode({ id, data, selected }: NodeProps<EditorNode>) {
 
 const nodeTypes = { [NODE_TYPE]: MdNode };
 
-function Editor({ root: initialRoot, onChange, onReady, resolveMedia, onOpenMedia }: MapEditorProps) {
+const ORGANIZERS: Array<{ layout: Layout; label: string }> = [
+    { layout: 'right', label: 'Tidy tree' },
+    { layout: 'center', label: 'Center root' },
+    { layout: 'radial', label: 'Radial' },
+];
+
+function Editor({ root: initialRoot, positions: initialPositions, onChange, onReady, resolveMedia, onOpenMedia }: MapEditorProps) {
     const flow = useReactFlow<EditorNode>();
     const rootRef = useRef(initialRoot);
+    const positionsRef = useRef<Record<string, XY>>(initialPositions ?? {});
+    const layoutRef = useRef<Layout>('center');
     const past = useRef<PlainNode[]>([]);
     const future = useRef<PlainNode[]>([]);
     const selectedId = useRef<string | null>(null);
@@ -144,7 +158,7 @@ function Editor({ root: initialRoot, onChange, onReady, resolveMedia, onOpenMedi
 
     const render = useCallback(
         (root: PlainNode) => {
-            const laid = layoutTree(root);
+            const laid = layoutTree(root, layoutRef.current, positionsRef.current);
             setNodes(
                 laid.nodes.map(node => ({
                     ...node,
@@ -182,18 +196,30 @@ function Editor({ root: initialRoot, onChange, onReady, resolveMedia, onOpenMedi
         }
     }, [initialized, flow]);
 
+    const handleRef = useRef<MapEditorHandle | null>(null);
     useEffect(() => {
-        onReady({
-            reload(root) {
+        handleRef.current = {
+            reload(root, positions) {
                 rootRef.current = root;
+                if (positions) {
+                    positionsRef.current = positions;
+                }
                 render(root);
+            },
+            organize(layout) {
+                layoutRef.current = layout;
+                positionsRef.current = {};
+                render(rootRef.current);
+                onChange(rootRef.current, `organize:${layout}`, {});
+                setTimeout(() => flow.fitView({ padding: 0.1, maxZoom: 1.25 }), 50);
             },
             fit() {
                 return flow.fitView({ padding: 0.1, maxZoom: 1.25 });
             },
             instance: flow,
-        });
-    }, [onReady, render, flow]);
+        };
+        onReady(handleRef.current);
+    }, [onReady, render, flow, onChange]);
 
     /** Replaces the tree, records history and notifies the view. */
     const apply = useCallback(
@@ -205,7 +231,7 @@ function Editor({ root: initialRoot, onChange, onReady, resolveMedia, onOpenMedi
             future.current = [];
             rootRef.current = next;
             render(next);
-            onChange(next, source);
+            onChange(next, source, positionsRef.current);
         },
         [render, onChange],
     );
@@ -219,7 +245,7 @@ function Editor({ root: initialRoot, onChange, onReady, resolveMedia, onOpenMedi
             to.push(rootRef.current);
             rootRef.current = target;
             render(target);
-            onChange(target, source);
+            onChange(target, source, positionsRef.current);
         },
         [render, onChange],
     );
@@ -254,11 +280,16 @@ function Editor({ root: initialRoot, onChange, onReady, resolveMedia, onOpenMedi
             const target = flow.getIntersectingNodes(node).find(other => other.id !== node.id);
             if (target) {
                 apply(moveInto(rootRef.current, node.id, target.id), 'move');
+            } else if (node.id !== rootRef.current.id) {
+                // Dropped on empty canvas: the node keeps this position and the file remembers it.
+                positionsRef.current = { ...positionsRef.current, [node.id]: { ...node.position } };
+                render(rootRef.current);
+                onChange(rootRef.current, 'position', positionsRef.current);
             } else {
                 render(rootRef.current);
             }
         },
-        [flow, apply, render],
+        [flow, apply, render, onChange],
     );
 
     const onKeyDown = useCallback(
@@ -331,6 +362,7 @@ function Editor({ root: initialRoot, onChange, onReady, resolveMedia, onOpenMedi
                 onSelectionChange={onSelectionChange}
                 onNodeDoubleClick={(_event, node) => startEditing(node.id)}
                 onNodeDragStop={onNodeDragStop}
+                nodeDragThreshold={4}
                 deleteKeyCode={null}
                 selectionKeyCode={null}
                 multiSelectionKeyCode={null}
@@ -341,6 +373,18 @@ function Editor({ root: initialRoot, onChange, onReady, resolveMedia, onOpenMedi
                 proOptions={{ hideAttribution: true }}
             >
                 <Background />
+                <Panel position="top-right" className="poc-rf-panel">
+                    {ORGANIZERS.map(item => (
+                        <button
+                            key={item.layout}
+                            className="poc-rf-organize"
+                            data-layout={item.layout}
+                            onClick={() => handleRef.current?.organize(item.layout)}
+                        >
+                            {item.label}
+                        </button>
+                    ))}
+                </Panel>
             </ReactFlow>
         </div>
     );

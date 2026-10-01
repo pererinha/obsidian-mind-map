@@ -7,11 +7,11 @@
  */
 
 import type { Edge, Node } from '@xyflow/react';
-import { NodeKind, PlainNode } from './md-tree';
+import { NodeKind, PlainNode, XY } from './md-tree';
 
 export const NODE_TYPE = 'md';
 
-export type Layout = 'center' | 'right';
+export type Layout = 'center' | 'right' | 'radial';
 export type Side = 'left' | 'right';
 
 /** One colour per top-level branch, inherited by the subtree. Obsidian defines these for both themes. */
@@ -141,7 +141,18 @@ function layoutSide(root: PlainNode, branches: Branch[], side: Side): { nodes: M
     return { nodes, edges, height };
 }
 
-export function layoutTree(root: PlainNode, layout: Layout = 'center'): { nodes: MdFlowNode[]; edges: Edge[] } {
+/** Positions for the tree in the given layout; nodes listed in `overrides` keep the position the user gave them. */
+export function layoutTree(root: PlainNode, layout: Layout = 'center', overrides: Record<string, XY> = {}): { nodes: MdFlowNode[]; edges: Edge[] } {
+    const laid = layout === 'radial' ? layoutRadial(root) : layoutTidy(root, layout);
+    for (const node of laid.nodes) {
+        if (overrides[node.id]) {
+            node.position = { ...overrides[node.id] };
+        }
+    }
+    return laid;
+}
+
+function layoutTidy(root: PlainNode, layout: 'center' | 'right'): { nodes: MdFlowNode[]; edges: Edge[] } {
     const branches: Branch[] = root.children.map((node, index) => ({ node, color: BRANCH_COLORS[index % BRANCH_COLORS.length] }));
     const right = layout === 'right' ? branches : branches.filter((_, index) => index % 2 === 0);
     const left = layout === 'right' ? [] : branches.filter((_, index) => index % 2 === 1);
@@ -170,5 +181,58 @@ export function layoutTree(root: PlainNode, layout: Layout = 'center'): { nodes:
         }
         edges.push(...laid.edges);
     }
+    return { nodes, edges };
+}
+
+const RADIUS = 220;
+
+/** Root in the centre, every leaf on its own angle, parents on the mean angle of their children. */
+function layoutRadial(root: PlainNode): { nodes: MdFlowNode[]; edges: Edge[] } {
+    const nodes: MdFlowNode[] = [];
+    const edges: Edge[] = [];
+    const rootSize = estimateSize(root.title, 0);
+    nodes.push({
+        id: root.id,
+        type: NODE_TYPE,
+        position: { x: -rootSize.width / 2, y: -rootSize.height / 2 },
+        data: { title: root.title, label: shortLabel(root.title), kind: root.kind, preview: root.preview, depth: 0 },
+        ...rootSize,
+    });
+    const countLeaves = (node: PlainNode): number =>
+        node.children.length === 0 ? 1 : node.children.reduce((sum, child) => sum + countLeaves(child), 0);
+    const step = (2 * Math.PI) / Math.max(1, countLeaves(root));
+    let nextLeaf = 0;
+
+    /** Places the subtree and returns the node's angle. */
+    const place = (node: PlainNode, depth: number, color: string, parent: PlainNode): number => {
+        let angle: number;
+        if (node.children.length === 0) {
+            angle = nextLeaf * step - Math.PI / 2;
+            nextLeaf += 1;
+        } else {
+            const angles = node.children.map(child => place(child, depth + 1, color, node));
+            angle = (angles[0] + angles[angles.length - 1]) / 2;
+        }
+        const size = estimateSize(node.title, depth, node.preview, node.media);
+        const r = depth * RADIUS;
+        const side: Side = Math.cos(angle) < 0 ? 'left' : 'right';
+        nodes.push({
+            id: node.id,
+            type: NODE_TYPE,
+            position: { x: r * Math.cos(angle) - size.width / 2, y: r * Math.sin(angle) - size.height / 2 },
+            data: { title: node.title, label: shortLabel(node.title), kind: node.kind, preview: node.preview, media: node.media, depth, side, color },
+            ...size,
+        });
+        edges.push({
+            id: `${parent.id}-${node.id}`,
+            source: parent.id,
+            sourceHandle: parent === root ? side : undefined,
+            target: node.id,
+            type: 'default',
+            style: { stroke: color, strokeWidth: 2 },
+        });
+        return angle;
+    };
+    root.children.forEach((child, index) => place(child, 1, BRANCH_COLORS[index % BRANCH_COLORS.length], root));
     return { nodes, edges };
 }

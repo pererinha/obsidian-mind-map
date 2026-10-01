@@ -2,7 +2,7 @@ import { ItemView, TFile, WorkspaceLeaf } from 'obsidian';
 import { createRoot, Root } from 'react-dom/client';
 import reactFlowCss from '@xyflow/react/dist/style.css';
 import { EditorSync, injectCss, whenSized } from './editor-sync';
-import { PlainNode } from './md-tree';
+import { PlainNode, XY } from './md-tree';
 import { MapEditor, MapEditorHandle, ResolvedMedia } from './map-editor';
 import { MindMapSettings } from './settings';
 
@@ -63,7 +63,7 @@ export default class ReactFlowView extends ItemView {
             return;
         }
         this.sync?.unwatch();
-        this.sync = new EditorSync(this.app, file, root => this.editor?.reload(root), {
+        this.sync = new EditorSync(this.app, file, root => this.editor?.reload(root, this.sync.positions()), {
             listItems: this.settings.listItemsAsNodes,
         });
         const root = await this.sync.load();
@@ -75,7 +75,8 @@ export default class ReactFlowView extends ItemView {
         this.reactRoot.render(
             <MapEditor
                 root={root}
-                onChange={(next: PlainNode, source: string) => this.commit(next, source)}
+                positions={this.sync.positions()}
+                onChange={(next: PlainNode, source: string, positions: Record<string, XY>) => this.commit(next, source, positions)}
                 onReady={handle => (this.editor = handle)}
                 resolveMedia={link => this.resolveMedia(link)}
                 onOpenMedia={link => this.app.workspace.openLinkText(link, this.filePath, true)}
@@ -98,9 +99,9 @@ export default class ReactFlowView extends ItemView {
     }
 
     /** Writes the tree and shows the editor what was written (reconcile may reorder list items before headings). */
-    private async commit(next: PlainNode, source: string) {
-        if (await this.sync.commit(next, `rf ${source}`)) {
-            this.editor?.reload(this.sync.root());
+    private async commit(next: PlainNode, source: string, positions: Record<string, XY>) {
+        if (await this.sync.commit(next, `rf ${source}`, positions)) {
+            this.editor?.reload(this.sync.root(), this.sync.positions());
         }
     }
 }
