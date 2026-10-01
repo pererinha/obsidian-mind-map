@@ -12,6 +12,15 @@
  * paragraphs) are the body of that item and travel with it. Under a heading,
  * list children come before heading children, as in the document.
  *
+ * Node positions the user dragged are kept at the end of the note in an
+ * Obsidian comment block, keyed by the node's title path:
+ *
+ *     %% mindmap-positions
+ *     Heading A/Sub B: 120,-40
+ *     %%
+ *
+ * The block is written only while at least one node has a position.
+ *
  * Blank lines that separate sections are stored on the node that follows
  * them (`gapBefore`), except for a parent's first child, whose gap is stored
  * on the parent (`gapFirstChild`). Reordering siblings then keeps the
@@ -49,7 +58,20 @@ export interface MdTree {
     defaultGap: number;
     /** Not serialized; holds the top-level headings. */
     root: MdNode;
+    /** Dragged node positions by title path; empty means no block in the file. */
+    positions: Record<string, XY>;
+    /** Blank lines before the positions block. */
+    positionsGap: number;
 }
+
+export interface XY {
+    x: number;
+    y: number;
+}
+
+const POSITIONS_START = '%% mindmap-positions';
+const POSITIONS_END = '%%';
+const POSITION_LINE_RE = /^(.*): (-?\d+),(-?\d+)$/;
 
 /** Engine-agnostic shape the views exchange with the editor libraries. */
 export interface PlainNode {
@@ -98,7 +120,7 @@ function trimTrailingBlanks(lines: string[]): number {
 export function parseMarkdown(md: string, previous?: MdTree, options: ParseOptions = {}): MdTree {
     const lines = md.split('\n');
     const root: MdNode = { id: 'root', title: '', kind: 'heading', body: [], children: [] };
-    const tree: MdTree = { preamble: [], baseLevel: 1, trailingBlanks: 0, defaultGap: 0, root };
+    const tree: MdTree = { preamble: [], baseLevel: 1, trailingBlanks: 0, defaultGap: 0, root, positions: {}, positionsGap: 1 };
     const gapCounts = new Map<number, number>();
 
     // stack of [level, node]; the virtual root sits at level 0
@@ -146,6 +168,7 @@ export function parseMarkdown(md: string, previous?: MdTree, options: ParseOptio
     }
 
     tree.trailingBlanks = current ? trimTrailingBlanks(current.body) : trimTrailingBlanks(tree.preamble);
+    extractPositions(tree, current ? current.body : tree.preamble);
     gapCounts.forEach((count, gap) => {
         const best = gapCounts.get(tree.defaultGap) ?? 0;
         if (count > best || (count === best && gap > tree.defaultGap)) {
@@ -159,6 +182,29 @@ export function parseMarkdown(md: string, previous?: MdTree, options: ParseOptio
         adoptIds(root, previous.root);
     }
     return tree;
+}
+
+/** Takes the positions block off the end of `lines`, when there is one. */
+function extractPositions(tree: MdTree, lines: string[]): void {
+    if (lines[lines.length - 1] !== POSITIONS_END) {
+        return;
+    }
+    const start = lines.lastIndexOf(POSITIONS_START);
+    if (start < 0) {
+        return;
+    }
+    const entries = lines.slice(start + 1, lines.length - 1);
+    const positions: Record<string, XY> = {};
+    for (const entry of entries) {
+        const match = entry.match(POSITION_LINE_RE);
+        if (!match) {
+            return; // not our block; leave it as body
+        }
+        positions[match[1]] = { x: Number(match[2]), y: Number(match[3]) };
+    }
+    lines.splice(start);
+    tree.positions = positions;
+    tree.positionsGap = trimTrailingBlanks(lines);
 }
 
 /** Moves the list items of each heading's body into list nodes, recursively. */
@@ -246,6 +292,17 @@ export function serializeMarkdown(tree: MdTree): string {
     };
 
     emitChildren(tree.root, tree.baseLevel, '');
+    const paths = Object.keys(tree.positions);
+    if (paths.length > 0) {
+        for (let i = 0; i < tree.positionsGap; i++) {
+            out.push('');
+        }
+        out.push(POSITIONS_START);
+        for (const path of paths) {
+            out.push(`${path}: ${tree.positions[path].x},${tree.positions[path].y}`);
+        }
+        out.push(POSITIONS_END);
+    }
     for (let i = 0; i < tree.trailingBlanks; i++) {
         out.push('');
     }
@@ -303,7 +360,7 @@ function indexNodes(node: MdNode, into: Map<string, MdNode>): void {
  * list item is a list item; under a heading, list items are written before
  * sub-headings.
  */
-export function reconcile(tree: MdTree, editorRoot: PlainNode): MdTree {
+export function reconcile(tree: MdTree, editorRoot: PlainNode, positionsById?: Record<string, XY>): MdTree {
     const known = new Map<string, MdNode>();
     indexNodes(tree.root, known);
 
@@ -338,5 +395,47 @@ export function reconcile(tree: MdTree, editorRoot: PlainNode): MdTree {
     const root: MdNode = singleTop
         ? { ...tree.root, children: [rebuilt] }
         : { ...tree.root, children: rebuilt.children };
-    return { ...tree, root };
+    const positions = positionsById ? positionsToPaths(editorRoot, positionsById) : tree.positions;
+    return { ...tree, root, positions };
+}
+
+/** Title path of every node under the editor root, by id ("A/B" for B under A). */
+function pathsById(root: PlainNode): Map<string, string> {
+    const paths = new Map<string, string>();
+    const visit = (node: PlainNode, prefix: string) => {
+        for (const child of node.children) {
+            const path = prefix ? `${prefix}/${child.title}` : child.title;
+            paths.set(child.id, path);
+            visit(child, path);
+        }
+    };
+    visit(root, '');
+    return paths;
+}
+
+/** Positions keyed by node id, for the editor. Paths that match no node are dropped. */
+export function positionsToIds(root: PlainNode, positions: Record<string, XY>): Record<string, XY> {
+    const byPath = new Map<string, string>();
+    pathsById(root).forEach((path, id) => byPath.set(path, id));
+    const result: Record<string, XY> = {};
+    for (const path of Object.keys(positions)) {
+        const id = byPath.get(path);
+        if (id) {
+            result[id] = positions[path];
+        }
+    }
+    return result;
+}
+
+/** Positions keyed by title path, for the file. Ids that match no node are dropped. */
+export function positionsToPaths(root: PlainNode, positions: Record<string, XY>): Record<string, XY> {
+    const paths = pathsById(root);
+    const result: Record<string, XY> = {};
+    for (const id of Object.keys(positions)) {
+        const path = paths.get(id);
+        if (path) {
+            result[path] = { x: Math.round(positions[id].x), y: Math.round(positions[id].y) };
+        }
+    }
+    return result;
 }

@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { mapRoot, mediaLinks, parseMarkdown, reconcile, serializeMarkdown, PlainNode } from '../src/md-tree';
+import { mapRoot, mediaLinks, parseMarkdown, positionsToIds, reconcile, serializeMarkdown, PlainNode } from '../src/md-tree';
 
 const CANAL = [
     '# Canal',
@@ -265,5 +265,35 @@ describe('md-tree media', () => {
         const root = mapRoot(parseMarkdown(story), 'story');
         const conflict = find(root, '4) the protagonist main story conflict')!;
         expect(conflict.media).to.deep.equal(['1.projects/1.personal/utube/_files/Screenshot 2026-10-01 at 2.37.40 PM.png']);
+    });
+});
+
+describe('md-tree positions block', () => {
+    const WITH_BLOCK = CANAL + '\n%% mindmap-positions\nPesquisa/Artigos: 120,-40\nRoteiro: -300,15\n%%\n';
+
+    it('round-trips a note with a positions block byte for byte', () => {
+        expect(serializeMarkdown(parseMarkdown(WITH_BLOCK))).to.equal(WITH_BLOCK);
+        const tree = parseMarkdown(WITH_BLOCK);
+        expect(tree.positions).to.deep.equal({ 'Pesquisa/Artigos': { x: 120, y: -40 }, Roteiro: { x: -300, y: 15 } });
+        expect(mapRoot(tree, 'f').children.map(c => c.title)).to.deep.equal(['Pesquisa', 'Roteiro']);
+    });
+
+    it('maps the block to node ids and back, and drops the block when nothing is positioned', () => {
+        const tree = parseMarkdown(CANAL);
+        const root = mapRoot(tree, 'f');
+        const artigos = find(root, 'Artigos')!;
+        const moved = reconcile(tree, root, { [artigos.id]: { x: 120.4, y: -39.6 } });
+        expect(serializeMarkdown(moved)).to.equal(CANAL + '\n%% mindmap-positions\nPesquisa/Artigos: 120,-40\n%%\n');
+        expect(positionsToIds(mapRoot(moved, 'f'), moved.positions)).to.deep.equal({ [artigos.id]: { x: 120, y: -40 } });
+        expect(serializeMarkdown(reconcile(moved, root, {}))).to.equal(CANAL);
+    });
+
+    it('a renamed node keeps its position under the new path', () => {
+        const tree = parseMarkdown(CANAL);
+        const root = mapRoot(tree, 'f');
+        const artigos = find(root, 'Artigos')!;
+        artigos.title = 'Papers';
+        const out = serializeMarkdown(reconcile(tree, root, { [artigos.id]: { x: 1, y: 2 } }));
+        expect(out).to.contain('%% mindmap-positions\nPesquisa/Papers: 1,2\n%%');
     });
 });

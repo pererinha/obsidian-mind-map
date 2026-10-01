@@ -8,7 +8,7 @@
  */
 
 import { App, EventRef, TFile } from 'obsidian';
-import { MdTree, ParseOptions, PlainNode, mapRoot, parseMarkdown, reconcile, serializeMarkdown } from './md-tree';
+import { MdTree, ParseOptions, PlainNode, XY, mapRoot, parseMarkdown, positionsToIds, reconcile, serializeMarkdown } from './md-tree';
 
 export class EditorSync {
     private tree: MdTree;
@@ -33,9 +33,14 @@ export class EditorSync {
         return mapRoot(this.tree, this.file.basename);
     }
 
+    /** The file's saved positions, keyed by node id of the current root. */
+    positions(): Record<string, XY> {
+        return positionsToIds(this.root(), this.tree.positions);
+    }
+
     /** Returns true when the file was written. */
-    async commit(editorRoot: PlainNode, source: string): Promise<boolean> {
-        const next = reconcile(this.tree, editorRoot);
+    async commit(editorRoot: PlainNode, source: string, positions?: Record<string, XY>): Promise<boolean> {
+        const next = reconcile(this.tree, editorRoot, positions);
         const md = serializeMarkdown(next);
         if (md === this.lastWritten) {
             return false;
