@@ -41,9 +41,7 @@
     "@xyflow/react": "^12.12.0",
     "markmap-lib": "^0.10.2",
     "markmap-view": "^0.1.2",
-    "mind-elixir": "^5.15.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "simple-mind-map": "^0.14.0-fix.3"
+    "react-dom": "^18.3.1"
   }
 }
