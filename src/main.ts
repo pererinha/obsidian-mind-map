@@ -8,6 +8,8 @@ import MindmapView from './mindmap-view';
 import { MM_VIEW_TYPE } from './constants';
 import { MindMapSettings } from './settings';
 import { MindMapSettingsTab } from './settings-tab';
+import MindElixirView, { ME_VIEW_TYPE } from './mind-elixir-view';
+import SimpleMindMapView, { SMM_VIEW_TYPE } from './simple-mind-map-view';
 
   
   export default class MindMap extends Plugin {
@@ -44,6 +46,20 @@ import { MindMapSettingsTab } from './settings-tab';
 
       this.addSettingTab(new MindMapSettingsTab(this.app, this));
 
+      // POC: editable mind maps backed by the note's headings.
+      this.registerView(ME_VIEW_TYPE, (leaf: WorkspaceLeaf) => new MindElixirView(leaf));
+      this.registerView(SMM_VIEW_TYPE, (leaf: WorkspaceLeaf) => new SimpleMindMapView(leaf));
+      this.addCommand({
+        id: 'poc-edit-mind-elixir',
+        name: 'POC: Edit current note as mind map (Mind Elixir)',
+        callback: () => this.openPocEditor(ME_VIEW_TYPE),
+      });
+      this.addCommand({
+        id: 'poc-edit-simple-mind-map',
+        name: 'POC: Edit current note as mind map (SimpleMindMap)',
+        callback: () => this.openPocEditor(SMM_VIEW_TYPE),
+      });
+
     }
 
     markMapPreview() {
@@ -60,6 +76,15 @@ import { MindMapSettingsTab } from './settings-tab';
       preview.open(mmPreview);
     }
       
+    async openPocEditor(viewType: string) {
+      const file = this.app.workspace.getActiveFile();
+      if (!file) {
+        return;
+      }
+      const leaf = this.app.workspace.getLeaf('split', 'vertical');
+      await leaf.setViewState({ type: viewType, state: { file: file.path }, active: true });
+    }
+
     onunload() {
       console.log("Unloading Mind Map plugin");
     }

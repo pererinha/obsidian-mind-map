@@ -1,0 +1,8 @@
+.poc-editor-content {
+    padding: 0;
+    overflow: hidden;
+}
+.poc-editor-host {
+    width: 100%;
+    height: 100%;
+}
