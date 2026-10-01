@@ -7,7 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
     Background,
     Handle,
@@ -15,16 +15,20 @@ import {
     ReactFlow,
     ReactFlowProvider,
     useEdgesState,
+    useNodesInitialized,
     useNodesState,
     useReactFlow,
 } from '@xyflow/react';
-import type { Edge, Node, NodeProps, OnNodeDrag, OnSelectionChangeFunc } from '@xyflow/react';
+import type { Edge, Node, NodeProps, OnNodeDrag, OnSelectionChangeFunc, ReactFlowInstance } from '@xyflow/react';
 import { PlainNode } from './md-tree';
-import { MdFlowNode, NODE_TYPE, layoutTree } from './tree-layout';
+import { MdNodeData, NODE_TYPE, layoutTree } from './tree-layout';
 import { addChild, addSiblingAfter, moveInto, moveSibling, remove, rename } from './tree-ops';
 
 export interface MapEditorHandle {
     reload(root: PlainNode): void;
+    fit(): Promise<boolean>;
+    /** The React Flow instance, for scripts that drive the view. */
+    instance: ReactFlowInstance<EditorNode>;
 }
 
 interface MapEditorProps {
@@ -33,9 +37,7 @@ interface MapEditorProps {
     onReady(handle: MapEditorHandle): void;
 }
 
-interface EditorNodeData extends Record<string, unknown> {
-    title: string;
-    depth: number;
+interface EditorNodeData extends MdNodeData {
     editing: boolean;
     onCommit(id: string, title: string): void;
     onCancel(): void;
@@ -44,9 +46,10 @@ interface EditorNodeData extends Record<string, unknown> {
 type EditorNode = Node<EditorNodeData, typeof NODE_TYPE>;
 
 function MdNode({ id, data, selected }: NodeProps<EditorNode>) {
-    const classes = ['poc-rf-node', `poc-rf-depth-${data.depth}`, selected ? 'poc-rf-selected' : ''].join(' ');
+    const classes = ['poc-rf-node', data.depth === 0 ? 'poc-rf-root-node' : '', selected ? 'poc-rf-selected' : ''].join(' ');
+    const style = data.color ? ({ '--poc-branch': data.color } as CSSProperties) : undefined;
     return (
-        <div className={classes}>
+        <div className={classes} style={style} title={data.title}>
             <Handle type="target" position={Position.Left} className="poc-rf-handle" />
             {data.editing ? (
                 <input
@@ -65,7 +68,7 @@ function MdNode({ id, data, selected }: NodeProps<EditorNode>) {
                     onBlur={e => data.onCommit(id, e.currentTarget.value)}
                 />
             ) : (
-                <span className="poc-rf-title">{data.title}</span>
+                <span className="poc-rf-title">{data.label}</span>
             )}
             <Handle type="source" position={Position.Right} className="poc-rf-handle" />
         </div>
@@ -75,19 +78,25 @@ function MdNode({ id, data, selected }: NodeProps<EditorNode>) {
 const nodeTypes = { [NODE_TYPE]: MdNode };
 
 function Editor({ root: initialRoot, onChange, onReady }: MapEditorProps) {
-    const flow = useReactFlow<MdFlowNode>();
+    const flow = useReactFlow<EditorNode>();
     const rootRef = useRef(initialRoot);
     const past = useRef<PlainNode[]>([]);
     const future = useRef<PlainNode[]>([]);
     const selectedId = useRef<string | null>(null);
-    const [nodes, setNodes, onNodesChange] = useNodesState<MdFlowNode>([]);
+    const [nodes, setNodes, onNodesChange] = useNodesState<EditorNode>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     const [editingId, setEditingId] = useState<string | null>(null);
 
     const render = useCallback(
         (root: PlainNode) => {
             const laid = layoutTree(root);
-            setNodes(laid.nodes.map(node => ({ ...node, selected: node.id === selectedId.current })));
+            setNodes(
+                laid.nodes.map(node => ({
+                    ...node,
+                    selected: node.id === selectedId.current,
+                    data: { ...node.data, editing: false, onCommit, onCancel },
+                })),
+            );
             setEdges(laid.edges);
         },
         [setNodes, setEdges],
@@ -95,8 +104,18 @@ function Editor({ root: initialRoot, onChange, onReady }: MapEditorProps) {
 
     useEffect(() => {
         render(rootRef.current);
-        requestAnimationFrame(() => flow.fitView({ padding: 0.2 }));
     }, []);
+
+    // Nodes are measured after the first render; fit the viewport once they are.
+    const initialized = useNodesInitialized();
+    const fitted = useRef(false);
+    useEffect(() => {
+        if (initialized && !fitted.current) {
+            fitted.current = true;
+            // The split that hosts the view may still be resizing on its first frames.
+            setTimeout(() => flow.fitView({ padding: 0.1, maxZoom: 1.25 }), 100);
+        }
+    }, [initialized, flow]);
 
     useEffect(() => {
         onReady({
@@ -104,8 +123,12 @@ function Editor({ root: initialRoot, onChange, onReady }: MapEditorProps) {
                 rootRef.current = root;
                 render(root);
             },
+            fit() {
+                return flow.fitView({ padding: 0.1, maxZoom: 1.25 });
+            },
+            instance: flow,
         });
-    }, [onReady, render]);
+    }, [onReady, render, flow]);
 
     /** Replaces the tree, records history and notifies the view. */
     const apply = useCallback(
@@ -157,11 +180,11 @@ function Editor({ root: initialRoot, onChange, onReady }: MapEditorProps) {
 
     const onCancel = useCallback(() => setEditingId(null), []);
 
-    const onSelectionChange = useCallback<OnSelectionChangeFunc<MdFlowNode>>(({ nodes: selected }) => {
+    const onSelectionChange = useCallback<OnSelectionChangeFunc<EditorNode>>(({ nodes: selected }) => {
         selectedId.current = selected[0]?.id ?? null;
     }, []);
 
-    const onNodeDragStop = useCallback<OnNodeDrag<MdFlowNode>>(
+    const onNodeDragStop = useCallback<OnNodeDrag<EditorNode>>(
         (_event, node) => {
             const target = flow.getIntersectingNodes(node).find(other => other.id !== node.id);
             if (target) {
@@ -228,8 +251,8 @@ function Editor({ root: initialRoot, onChange, onReady }: MapEditorProps) {
     );
 
     const displayNodes = useMemo<EditorNode[]>(
-        () => nodes.map(node => ({ ...node, data: { ...node.data, editing: node.id === editingId, onCommit, onCancel } })),
-        [nodes, editingId, onCommit, onCancel],
+        () => nodes.map(node => ({ ...node, data: { ...node.data, editing: node.id === editingId } })),
+        [nodes, editingId],
     );
 
     return (

@@ -47,6 +47,7 @@ export default class ReactFlowView extends ItemView {
         this.contentEl.empty();
         this.contentEl.addClass('poc-editor-content');
         this.host = this.contentEl.createDiv({ cls: 'poc-editor-host' });
+        this.registerEvent(this.app.workspace.on('resize', () => this.editor?.fit()));
     }
 
     async onClose() {

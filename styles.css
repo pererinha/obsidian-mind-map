@@ -12,21 +12,33 @@
     width: 100%;
     height: 100%;
     outline: none;
+    --poc-branch: var(--interactive-accent);
 }
 .poc-rf-node {
     padding: 6px 12px;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 6px;
-    background: var(--background-primary);
+    border: 2px solid var(--poc-branch);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--poc-branch) 18%, var(--background-primary));
     color: var(--text-normal);
     font-family: var(--font-interface);
     font-size: 14px;
     line-height: 22px;
     white-space: nowrap;
 }
+.poc-rf-root-node {
+    border-radius: 50%;
+    min-width: 84px;
+    min-height: 84px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+    font-weight: 600;
+    background: var(--poc-branch);
+    color: var(--text-on-accent);
+}
 .poc-rf-node.poc-rf-selected {
-    border-color: var(--interactive-accent);
-    box-shadow: 0 0 0 1px var(--interactive-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--poc-branch) 45%, transparent);
 }
 .poc-rf-handle {
     opacity: 0;
@@ -36,4 +48,5 @@
     font: inherit;
     width: 100%;
     min-width: 80px;
+    color: var(--text-normal);
 }
