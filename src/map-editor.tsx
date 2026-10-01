@@ -48,9 +48,27 @@ type EditorNode = Node<EditorNodeData, typeof NODE_TYPE>;
 function MdNode({ id, data, selected }: NodeProps<EditorNode>) {
     const classes = ['poc-rf-node', data.depth === 0 ? 'poc-rf-root-node' : '', selected ? 'poc-rf-selected' : ''].join(' ');
     const style = data.color ? ({ '--poc-branch': data.color } as CSSProperties) : undefined;
+    // The root feeds both sides; other nodes face the root with their target handle.
+    const handles =
+        data.depth === 0 ? (
+            <>
+                <Handle type="source" id="left" position={Position.Left} className="poc-rf-handle" />
+                <Handle type="source" id="right" position={Position.Right} className="poc-rf-handle" />
+            </>
+        ) : data.side === 'left' ? (
+            <>
+                <Handle type="target" position={Position.Right} className="poc-rf-handle" />
+                <Handle type="source" position={Position.Left} className="poc-rf-handle" />
+            </>
+        ) : (
+            <>
+                <Handle type="target" position={Position.Left} className="poc-rf-handle" />
+                <Handle type="source" position={Position.Right} className="poc-rf-handle" />
+            </>
+        );
     return (
         <div className={classes} style={style} title={data.title}>
-            <Handle type="target" position={Position.Left} className="poc-rf-handle" />
+            {handles}
             {data.editing ? (
                 <input
                     className="poc-rf-input"
@@ -70,7 +88,6 @@ function MdNode({ id, data, selected }: NodeProps<EditorNode>) {
             ) : (
                 <span className="poc-rf-title">{data.label}</span>
             )}
-            <Handle type="source" position={Position.Right} className="poc-rf-handle" />
         </div>
     );
 }
