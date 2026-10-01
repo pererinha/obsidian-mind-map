@@ -7,7 +7,7 @@
  */
 
 import type { Edge, Node } from '@xyflow/react';
-import { PlainNode } from './md-tree';
+import { NodeKind, PlainNode } from './md-tree';
 
 export const NODE_TYPE = 'md';
 
@@ -28,6 +28,9 @@ export const LABEL_MAX = 40;
 
 export interface MdNodeData extends Record<string, unknown> {
     title: string;
+    kind?: NodeKind;
+    /** First line of the node's body, shown dimmed under the title. */
+    preview?: string;
     /** Title cut to LABEL_MAX characters for the canvas; the full title goes to the tooltip and the editor. */
     label: string;
     depth: number;
@@ -42,6 +45,9 @@ export type MdFlowNode = Node<MdNodeData, typeof NODE_TYPE>;
 const CHAR_WIDTH = 7.5;
 const PADDING_X = 24;
 const NODE_HEIGHT = 36;
+const PREVIEW_HEIGHT = 14;
+const PREVIEW_CHAR_WIDTH = 6.5;
+const PREVIEW_MAX_WIDTH = 240;
 const ROOT_SIZE = 84;
 const GAP_X = 60;
 const GAP_Y = 16;
@@ -51,12 +57,14 @@ export function shortLabel(title: string): string {
 }
 
 /** Estimated box size before the node is measured. */
-export function estimateSize(title: string, depth: number): { width: number; height: number } {
+export function estimateSize(title: string, depth: number, preview?: string): { width: number; height: number } {
     if (depth === 0) {
         const side = Math.max(ROOT_SIZE, Math.round(shortLabel(title).length * CHAR_WIDTH + PADDING_X));
         return { width: side, height: side };
     }
-    return { width: Math.max(60, Math.round(shortLabel(title).length * CHAR_WIDTH + PADDING_X)), height: NODE_HEIGHT };
+    const titleWidth = Math.round(shortLabel(title).length * CHAR_WIDTH + PADDING_X);
+    const previewWidth = preview ? Math.min(PREVIEW_MAX_WIDTH, Math.round(preview.length * PREVIEW_CHAR_WIDTH + PADDING_X)) : 0;
+    return { width: Math.max(60, titleWidth, previewWidth), height: preview ? NODE_HEIGHT + PREVIEW_HEIGHT : NODE_HEIGHT };
 }
 
 interface Branch {
@@ -75,7 +83,7 @@ function layoutSide(root: PlainNode, branches: Branch[], side: Side): { nodes: M
     const columnWidth: number[] = [];
 
     const measure = (node: PlainNode, depth: number) => {
-        columnWidth[depth] = Math.max(columnWidth[depth] ?? 0, estimateSize(node.title, depth).width);
+        columnWidth[depth] = Math.max(columnWidth[depth] ?? 0, estimateSize(node.title, depth, node.preview).width);
         node.children.forEach(child => measure(child, depth + 1));
     };
     branches.forEach(branch => measure(branch.node, 1));
@@ -89,7 +97,7 @@ function layoutSide(root: PlainNode, branches: Branch[], side: Side): { nodes: M
     let nextRow = 0;
     /** Places the subtree and returns the node's centre y. */
     const place = (node: PlainNode, depth: number, color: string, parent: PlainNode): number => {
-        const size = estimateSize(node.title, depth);
+        const size = estimateSize(node.title, depth, node.preview);
         let centerY: number;
         if (node.children.length === 0) {
             centerY = nextRow * (NODE_HEIGHT + GAP_Y) + NODE_HEIGHT / 2;
@@ -103,7 +111,7 @@ function layoutSide(root: PlainNode, branches: Branch[], side: Side): { nodes: M
             id: node.id,
             type: NODE_TYPE,
             position: { x, y: centerY - size.height / 2 },
-            data: { title: node.title, label: shortLabel(node.title), depth, side, color },
+            data: { title: node.title, label: shortLabel(node.title), kind: node.kind, preview: node.preview, depth, side, color },
             ...size,
         });
         edges.push({
@@ -138,7 +146,7 @@ export function layoutTree(root: PlainNode, layout: Layout = 'center'): { nodes:
             id: root.id,
             type: NODE_TYPE,
             position: { x: -rootSize.width / 2, y: -rootSize.height / 2 },
-            data: { title: root.title, label: shortLabel(root.title), depth: 0 },
+            data: { title: root.title, label: shortLabel(root.title), kind: root.kind, preview: root.preview, depth: 0 },
             ...rootSize,
         },
     ];

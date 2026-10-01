@@ -46,7 +46,7 @@ import ReactFlowView, { RF_VIEW_TYPE } from './react-flow-view';
       this.addSettingTab(new MindMapSettingsTab(this.app, this));
 
       // POC: editable mind maps backed by the note's headings.
-      this.registerView(RF_VIEW_TYPE, (leaf: WorkspaceLeaf) => new ReactFlowView(leaf));
+      this.registerView(RF_VIEW_TYPE, (leaf: WorkspaceLeaf) => new ReactFlowView(leaf, this.settings));
       this.addCommand({
         id: 'poc-edit-react-flow',
         name: 'POC: Edit current note as mind map (React Flow)',

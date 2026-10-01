@@ -46,7 +46,12 @@ interface EditorNodeData extends MdNodeData {
 type EditorNode = Node<EditorNodeData, typeof NODE_TYPE>;
 
 function MdNode({ id, data, selected }: NodeProps<EditorNode>) {
-    const classes = ['poc-rf-node', data.depth === 0 ? 'poc-rf-root-node' : '', selected ? 'poc-rf-selected' : ''].join(' ');
+    const classes = [
+        'poc-rf-node',
+        data.depth === 0 ? 'poc-rf-root-node' : '',
+        data.kind === 'list' ? 'poc-rf-list-node' : '',
+        selected ? 'poc-rf-selected' : '',
+    ].join(' ');
     const style = data.color ? ({ '--poc-branch': data.color } as CSSProperties) : undefined;
     // The root feeds both sides; other nodes face the root with their target handle.
     const handles =
@@ -86,7 +91,10 @@ function MdNode({ id, data, selected }: NodeProps<EditorNode>) {
                     onBlur={e => data.onCommit(id, e.currentTarget.value)}
                 />
             ) : (
-                <span className="poc-rf-title">{data.label}</span>
+                <>
+                    <span className="poc-rf-title">{data.label}</span>
+                    {data.preview && data.depth > 0 && <span className="poc-rf-preview">{data.preview}</span>}
+                </>
             )}
         </div>
     );

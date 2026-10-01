@@ -37,6 +37,19 @@
     background: var(--poc-branch);
     color: var(--text-on-accent);
 }
+.poc-rf-list-node {
+    border-width: 1px;
+    border-style: dashed;
+    font-size: 13px;
+}
+.poc-rf-preview {
+    display: block;
+    font-size: 11px;
+    line-height: 14px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 .poc-rf-node.poc-rf-selected {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--poc-branch) 45%, transparent);
 }

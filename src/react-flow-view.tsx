@@ -4,6 +4,7 @@ import reactFlowCss from '@xyflow/react/dist/style.css';
 import { EditorSync, injectCss, whenSized } from './editor-sync';
 import { PlainNode } from './md-tree';
 import { MapEditor, MapEditorHandle } from './map-editor';
+import { MindMapSettings } from './settings';
 
 export const RF_VIEW_TYPE = 'poc-react-flow';
 
@@ -14,7 +15,7 @@ export default class ReactFlowView extends ItemView {
     private reactRoot: Root;
     private editor: MapEditorHandle;
 
-    constructor(leaf: WorkspaceLeaf) {
+    constructor(leaf: WorkspaceLeaf, private settings: MindMapSettings) {
         super(leaf);
     }
 
@@ -62,7 +63,9 @@ export default class ReactFlowView extends ItemView {
             return;
         }
         this.sync?.unwatch();
-        this.sync = new EditorSync(this.app, file, root => this.editor?.reload(root));
+        this.sync = new EditorSync(this.app, file, root => this.editor?.reload(root), {
+            listItems: this.settings.listItemsAsNodes,
+        });
         const root = await this.sync.load();
         const sized = await whenSized(this.host);
         console.log(`[poc][rf] host sized before init: ${sized}`);
@@ -72,10 +75,17 @@ export default class ReactFlowView extends ItemView {
         this.reactRoot.render(
             <MapEditor
                 root={root}
-                onChange={(next: PlainNode, source: string) => this.sync.commit(next, `rf ${source}`)}
+                onChange={(next: PlainNode, source: string) => this.commit(next, source)}
                 onReady={handle => (this.editor = handle)}
             />,
         );
         this.sync.watch();
+    }
+
+    /** Writes the tree and shows the editor what was written (reconcile may reorder list items before headings). */
+    private async commit(next: PlainNode, source: string) {
+        if (await this.sync.commit(next, `rf ${source}`)) {
+            this.editor?.reload(this.sync.root());
+        }
     }
 }

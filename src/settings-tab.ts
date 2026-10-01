@@ -32,6 +32,17 @@ export class MindMapSettingsTab extends PluginSettingTab {
                     }));
 
         new Setting(containerEl)
+            .setName('List items as nodes (POC editor)')
+            .setDesc('Show the list items under a heading as child nodes of that heading in the editable mind map')
+            .addToggle(toggle =>
+                toggle
+                    .setValue(this.plugin.settings.listItemsAsNodes ?? true)
+                    .onChange((value: boolean) => {
+                        this.plugin.settings.listItemsAsNodes = value;
+                        this.plugin.saveData(this.plugin.settings);
+                    }));
+
+        new Setting(containerEl)
             .setName('Node Min Height')
             .setDesc('Minimum height for the mind map nodes')
             .addText(text =>

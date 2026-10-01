@@ -49,7 +49,8 @@ export function rename(root: PlainNode, id: string, title: string): PlainNode {
 
 /** Appends a child and returns the new tree with the child's id. */
 export function addChild(root: PlainNode, parentId: string, title = NEW_NODE_TITLE): { root: PlainNode; id: string } {
-    const child: PlainNode = { id: nextId(), title, children: [] };
+    const parent = findNode(root, parentId);
+    const child: PlainNode = { id: nextId(), title, kind: parent?.kind === 'list' ? 'list' : 'heading', children: [] };
     const next = mapTree(root, node => (node.id === parentId ? { ...node, children: [...node.children, child] } : node));
     return { root: next, id: child.id };
 }
@@ -60,7 +61,8 @@ export function addSiblingAfter(root: PlainNode, id: string, title = NEW_NODE_TI
     if (!parent) {
         return addChild(root, root.id, title);
     }
-    const sibling: PlainNode = { id: nextId(), title, children: [] };
+    const reference = findNode(root, id);
+    const sibling: PlainNode = { id: nextId(), title, kind: reference?.kind, children: [] };
     const next = mapTree(root, node => {
         if (node.id !== parent.id) {
             return node;

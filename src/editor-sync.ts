@@ -8,19 +8,24 @@
  */
 
 import { App, EventRef, TFile } from 'obsidian';
-import { MdTree, PlainNode, mapRoot, parseMarkdown, reconcile, serializeMarkdown } from './md-tree';
+import { MdTree, ParseOptions, PlainNode, mapRoot, parseMarkdown, reconcile, serializeMarkdown } from './md-tree';
 
 export class EditorSync {
     private tree: MdTree;
     private lastWritten: string;
     private modifyRef: EventRef;
 
-    constructor(private app: App, private file: TFile, private onExternalChange: (root: PlainNode) => void) {}
+    constructor(
+        private app: App,
+        private file: TFile,
+        private onExternalChange: (root: PlainNode) => void,
+        private options: ParseOptions = {},
+    ) {}
 
     async load(): Promise<PlainNode> {
         const md = await this.app.vault.read(this.file);
         this.lastWritten = md;
-        this.tree = parseMarkdown(md);
+        this.tree = parseMarkdown(md, undefined, this.options);
         return this.root();
     }
 
@@ -53,7 +58,7 @@ export class EditorSync {
             }
             console.log(`[poc] external change in ${this.file.path}`);
             this.lastWritten = md;
-            this.tree = parseMarkdown(md, this.tree);
+            this.tree = parseMarkdown(md, this.tree, this.options);
             this.onExternalChange(this.root());
         });
     }
