@@ -1,4 +1,5 @@
 import {
+    Notice,
     Plugin,
     Vault,
     Workspace,
@@ -9,6 +10,8 @@ import { MM_VIEW_TYPE } from './constants';
 import { MindMapSettings } from './settings';
 import { MindMapSettingsTab } from './settings-tab';
 import ReactFlowView, { RF_VIEW_TYPE } from './react-flow-view';
+import { mapRoot, parseMarkdown } from './md-tree';
+import { toMermaidMindmap } from './mermaid';
 
   
   export default class MindMap extends Plugin {
@@ -52,6 +55,11 @@ import ReactFlowView, { RF_VIEW_TYPE } from './react-flow-view';
         name: 'POC: Edit current note as mind map (React Flow)',
         callback: () => this.openPocEditor(RF_VIEW_TYPE),
       });
+      this.addCommand({
+        id: 'poc-copy-mermaid-mindmap',
+        name: 'POC: Copy current note as Mermaid mindmap',
+        callback: () => this.copyMermaid(),
+      });
 
     }
 
@@ -76,6 +84,17 @@ import ReactFlowView, { RF_VIEW_TYPE } from './react-flow-view';
       }
       const leaf = this.app.workspace.getLeaf('split', 'vertical');
       await leaf.setViewState({ type: viewType, state: { file: file.path }, active: true });
+    }
+
+    async copyMermaid() {
+      const file = this.app.workspace.getActiveFile();
+      if (!file) {
+        return;
+      }
+      const md = await this.app.vault.read(file);
+      const root = mapRoot(parseMarkdown(md, undefined, { listItems: this.settings.listItemsAsNodes }), file.basename);
+      await navigator.clipboard.writeText(toMermaidMindmap(root));
+      new Notice('Mermaid mindmap copied to the clipboard');
     }
 
     onunload() {
