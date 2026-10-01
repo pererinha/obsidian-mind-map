@@ -3,6 +3,7 @@ import {nodeResolve} from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import copy from 'rollup-plugin-copy';
 import json from '@rollup/plugin-json';
+import replace from '@rollup/plugin-replace';
 
 // Inline .css imports as strings so views can inject engine styles at runtime.
 const cssAsString = () => ({
@@ -26,6 +27,8 @@ export default {
   external: ['obsidian'],
   plugins: [
     cssAsString(),
+    // React and React Flow read process.env.NODE_ENV; Obsidian has no process.env.
+    replace({ 'process.env.NODE_ENV': JSON.stringify('production'), preventAssignment: true }),
     typescript(),
     nodeResolve({browser: true}),
     commonjs(),
