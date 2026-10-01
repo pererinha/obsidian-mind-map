@@ -128,11 +128,21 @@ describe('md-tree with a real note (story.md)', () => {
         expect(serializeMarkdown(parseMarkdown(story))).to.equal(story);
     });
 
-    it('keeps lists and paragraphs as body of their heading', () => {
+    it('turns list items into nodes and keeps paragraphs as body with a preview', () => {
         const root = mapRoot(parseMarkdown(story), 'story');
         expect(root.title).to.equal('story');
         expect(root.children.map(c => c.title)).to.deep.equal(['story vs narrative', 'what is a story', 'the spine', 'summary']);
+        const narrative = find(root, 'a narrative')!;
+        expect(narrative.children.map(c => c.title)).to.deep.equal(['about CHARACTERS ', 'dealing with a PROBLEM', 'unified by a PREMISSE ', 'told in a STRUCTURED ORDER']);
+        expect(narrative.children.every(c => c.kind === 'list')).to.equal(true);
+        expect(find(root, 'narrative')!.preview).to.equal('series of events communicated in a logical order');
+        expect(find(root, 'narrative')!.children.map(c => c.title)).to.deep.equal(['examples']);
+    });
+
+    it('keeps list items as body when the option is off', () => {
+        const root = mapRoot(parseMarkdown(story, undefined, { listItems: false }), 'story');
         expect(find(root, 'a narrative')!.children).to.have.length(0);
+        expect(find(root, 'a narrative')!.preview).to.equal('- about CHARACTERS');
     });
 
     it('moving "summary" under "the spine" carries its paragraphs and re-levels "important"', () => {
@@ -145,5 +155,97 @@ describe('md-tree with a real note (story.md)', () => {
         expect(out).to.contain('### summary\nthe protagonist encounters');
         expect(out).to.contain('#### important\na story without a *problem*');
         expect(out.split('\n').length).to.equal(story.split('\n').length);
+    });
+});
+
+describe('md-tree list items', () => {
+    const NOTE = [
+        '# Note',
+        '',
+        '## Plan',
+        'intro paragraph',
+        '- first',
+        '- second',
+        '  - nested',
+        '- third',
+        '',
+        'closing paragraph',
+        '',
+        '## Other',
+        '- alpha',
+        '',
+    ].join('\n');
+
+    it('round-trips a note with nested lists and paragraphs byte for byte', () => {
+        expect(serializeMarkdown(parseMarkdown(NOTE))).to.equal(NOTE);
+    });
+
+    it('nests items by indentation and keeps the paragraphs as body', () => {
+        const root = mapRoot(parseMarkdown(NOTE), 'note');
+        const plan = find(root, 'Plan')!;
+        expect(plan.preview).to.equal('intro paragraph');
+        expect(plan.children.map(c => c.title)).to.deep.equal(['first', 'second', 'third']);
+        expect(find(root, 'second')!.children.map(c => c.title)).to.deep.equal(['nested']);
+        expect(find(root, 'third')!.preview).to.equal('closing paragraph');
+    });
+
+    it('renames a list item in place', () => {
+        const tree = parseMarkdown(NOTE);
+        const root = mapRoot(tree, 'note');
+        find(root, 'second')!.title = 'segundo';
+        expect(serializeMarkdown(reconcile(tree, root))).to.equal(NOTE.replace('- second', '- segundo'));
+    });
+
+    it('adds a list item after a sibling and a nested item under an item', () => {
+        const tree = parseMarkdown(NOTE);
+        const root = mapRoot(tree, 'note');
+        const plan = find(root, 'Plan')!;
+        plan.children.splice(1, 0, { id: 'n1', title: 'inserted', kind: 'list', children: [] });
+        find(root, 'nested')!.children.push({ id: 'n2', title: 'deeper', children: [] });
+        const out = serializeMarkdown(reconcile(tree, root));
+        expect(out).to.contain('- first\n- inserted\n- second\n  - nested\n    - deeper\n- third');
+    });
+
+    it('deletes a list item together with its paragraph', () => {
+        const tree = parseMarkdown(NOTE);
+        const root = mapRoot(tree, 'note');
+        const plan = find(root, 'Plan')!;
+        plan.children = plan.children.filter(c => c.title !== 'third');
+        expect(serializeMarkdown(reconcile(tree, root))).to.equal(NOTE.replace('- third\n\nclosing paragraph\n', ''));
+    });
+
+    it('moves a list item under another heading, after that heading\'s items', () => {
+        const tree = parseMarkdown(NOTE);
+        const root = mapRoot(tree, 'note');
+        const plan = find(root, 'Plan')!;
+        const other = find(root, 'Other')!;
+        const second = find(root, 'second')!;
+        plan.children = plan.children.filter(c => c !== second);
+        other.children.unshift(second);
+        const out = serializeMarkdown(reconcile(tree, root));
+        expect(out).to.contain('## Other\n- second\n  - nested\n- alpha\n');
+        expect(out).to.contain('## Plan\nintro paragraph\n- first\n- third\n\nclosing paragraph\n\n## Other');
+    });
+
+    it('writes list items before sub-headings and makes a heading moved under an item a list item', () => {
+        const md = '# N\n\n## A\n- one\n\n### B\nbody of b\n';
+        const tree = parseMarkdown(md);
+        const root = mapRoot(tree, 'n');
+        const a = find(root, 'A')!;
+        const b = find(root, 'B')!;
+        a.children = [b, ...a.children.filter(c => c !== b)];
+        expect(serializeMarkdown(reconcile(tree, root))).to.equal(md);
+        find(root, 'one')!.children.push(b);
+        a.children = a.children.filter(c => c !== b);
+        expect(serializeMarkdown(reconcile(tree, root))).to.equal('# N\n\n## A\n- one\n  - B\nbody of b\n');
+    });
+
+    it('a new child of a heading is a heading, a new child of an item is an item', () => {
+        const tree = parseMarkdown(NOTE);
+        const root = mapRoot(tree, 'note');
+        find(root, 'Other')!.children.push({ id: 'h1', title: 'Sub', children: [] });
+        find(root, 'alpha')!.children.push({ id: 'i1', title: 'beta', children: [] });
+        const out = serializeMarkdown(reconcile(tree, root));
+        expect(out).to.contain('## Other\n- alpha\n  - beta\n\n### Sub\n');
     });
 });

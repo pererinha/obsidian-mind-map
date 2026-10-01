@@ -6,6 +6,12 @@
  * the node when it moves. Heading levels are recomputed from tree depth on
  * serialization, so moving a node under a new parent re-levels its subtree.
  *
+ * List items in a heading's body become nodes too (kind "list"), nested by
+ * indentation. Lines before the first item stay the heading's body; lines
+ * after an item that are not items themselves (continuations, blank lines,
+ * paragraphs) are the body of that item and travel with it. Under a heading,
+ * list children come before heading children, as in the document.
+ *
  * Blank lines that separate sections are stored on the node that follows
  * them (`gapBefore`), except for a parent's first child, whose gap is stored
  * on the parent (`gapFirstChild`). Reordering siblings then keeps the
@@ -13,14 +19,21 @@
  * byte.
  */
 
+export type NodeKind = 'heading' | 'list';
+
 export interface MdNode {
     id: string;
     title: string;
-    /** Blank lines before this heading when it is not its parent's first child; undefined falls back to the tree default. */
+    kind: NodeKind;
+    /** List items: the bullet or number as written ("-", "*", "1."). */
+    marker?: string;
+    /** List items: the indentation as written; undefined means derive it from the parent. */
+    indent?: string;
+    /** Blank lines before this heading when it is not its parent's first heading child; undefined falls back to the tree default. */
     gapBefore?: number;
-    /** Blank lines between this node's body and its first child heading; undefined falls back to the tree default. */
+    /** Blank lines between this node's body (and list items) and its first child heading; undefined falls back to the tree default. */
     gapFirstChild?: number;
-    /** Lines under the heading, trailing blank lines removed. */
+    /** Lines under the heading or item, trailing blank lines removed. */
     body: string[];
     children: MdNode[];
 }
@@ -43,10 +56,21 @@ export interface PlainNode {
     id: string;
     title: string;
     children: PlainNode[];
+    /** Undefined on nodes the editor created; reconcile derives the kind from the parent. */
+    kind?: NodeKind;
+    /** First line of the node's body, for display only. */
+    preview?: string;
+}
+
+export interface ParseOptions {
+    /** Turn list items into nodes (default true). */
+    listItems?: boolean;
 }
 
 const HEADING_RE = /^(#{1,6})(?:\s+(.*))?$/;
+const LIST_ITEM_RE = /^(\s*)([-*+]|\d+[.)])\s(.*)$/;
 const FENCE_RE = /^(```|~~~)/;
+const PREVIEW_MAX = 60;
 
 let idCounter = 0;
 export function nextId(): string {
@@ -68,9 +92,9 @@ function trimTrailingBlanks(lines: string[]): number {
  * nodes in the previous tree (same title under the same parent, else same
  * position), so editors keyed by id survive an external edit of the file.
  */
-export function parseMarkdown(md: string, previous?: MdTree): MdTree {
+export function parseMarkdown(md: string, previous?: MdTree, options: ParseOptions = {}): MdTree {
     const lines = md.split('\n');
-    const root: MdNode = { id: 'root', title: '', body: [], children: [] };
+    const root: MdNode = { id: 'root', title: '', kind: 'heading', body: [], children: [] };
     const tree: MdTree = { preamble: [], baseLevel: 1, trailingBlanks: 0, defaultGap: 0, root };
     const gapCounts = new Map<number, number>();
 
@@ -103,7 +127,7 @@ export function parseMarkdown(md: string, previous?: MdTree): MdTree {
         }
 
         gapCounts.set(gapBefore, (gapCounts.get(gapBefore) ?? 0) + 1);
-        const node: MdNode = { id: nextId(), title, body: [], children: [] };
+        const node: MdNode = { id: nextId(), title, kind: 'heading', body: [], children: [] };
         while (stack[stack.length - 1].level >= level) {
             stack.pop();
         }
@@ -125,10 +149,48 @@ export function parseMarkdown(md: string, previous?: MdTree): MdTree {
             tree.defaultGap = gap;
         }
     });
+    if (options.listItems !== false) {
+        splitListItems(root);
+    }
     if (previous) {
         adoptIds(root, previous.root);
     }
     return tree;
+}
+
+/** Moves the list items of each heading's body into list nodes, recursively. */
+function splitListItems(heading: MdNode): void {
+    const headingChildren = heading.children;
+    const lead: string[] = [];
+    const items: MdNode[] = [];
+    // stack of [indent width, item]
+    const stack: Array<{ width: number; node: MdNode }> = [];
+    let inFence = false;
+
+    for (const line of heading.body) {
+        if (FENCE_RE.test(line)) {
+            inFence = !inFence;
+        }
+        const match = inFence ? null : line.match(LIST_ITEM_RE);
+        if (!match) {
+            (stack.length > 0 ? stack[stack.length - 1].node.body : lead).push(line);
+            continue;
+        }
+        const [, indent, marker, title] = match;
+        const width = indent.length;
+        const node: MdNode = { id: nextId(), title, kind: 'list', marker, indent, body: [], children: [] };
+        while (stack.length > 0 && stack[stack.length - 1].width >= width) {
+            stack.pop();
+        }
+        (stack.length > 0 ? stack[stack.length - 1].node.children : items).push(node);
+        stack.push({ width, node });
+    }
+
+    if (items.length > 0) {
+        heading.body = lead;
+        heading.children = [...items, ...headingChildren];
+    }
+    headingChildren.forEach(splitListItems);
 }
 
 function adoptIds(node: MdNode, previous: MdNode): void {
@@ -150,17 +212,37 @@ function adoptIds(node: MdNode, previous: MdNode): void {
 
 export function serializeMarkdown(tree: MdTree): string {
     const out: string[] = [...tree.preamble];
-    const emit = (node: MdNode, level: number, gap: number) => {
+    const gapFor = (parent: MdNode, child: MdNode, firstHeading: boolean) =>
+        (firstHeading ? parent.gapFirstChild : child.gapBefore) ?? tree.defaultGap;
+
+    const emitChildren = (parent: MdNode, level: number, indent: string) => {
+        let seenHeading = false;
+        for (const child of parent.children) {
+            if (child.kind === 'list') {
+                emitItem(child, indent);
+            } else {
+                emitHeading(child, level, gapFor(parent, child, !seenHeading));
+                seenHeading = true;
+            }
+        }
+    };
+    const emitHeading = (node: MdNode, level: number, gap: number) => {
         for (let i = 0; i < gap; i++) {
             out.push('');
         }
         out.push(node.title === '' ? '#'.repeat(level) : `${'#'.repeat(level)} ${node.title}`);
         out.push(...node.body);
-        node.children.forEach((child, index) => emit(child, level + 1, gapFor(node, child, index)));
+        emitChildren(node, level + 1, '');
     };
-    const gapFor = (parent: MdNode, child: MdNode, index: number) =>
-        (index === 0 ? parent.gapFirstChild : child.gapBefore) ?? tree.defaultGap;
-    tree.root.children.forEach((child, index) => emit(child, tree.baseLevel, gapFor(tree.root, child, index)));
+    const emitItem = (node: MdNode, parentIndent: string) => {
+        const marker = node.marker ?? '-';
+        const indent = node.indent ?? parentIndent;
+        out.push(`${indent}${marker} ${node.title}`);
+        out.push(...node.body);
+        emitChildren(node, 0, indent + ' '.repeat(marker.length + 1));
+    };
+
+    emitChildren(tree.root, tree.baseLevel, '');
     for (let i = 0; i < tree.trailingBlanks; i++) {
         out.push('');
     }
@@ -179,7 +261,9 @@ export function mapRoot(tree: MdTree, fallbackTitle: string): PlainNode {
 }
 
 export function toPlain(node: MdNode): PlainNode {
-    return { id: node.id, title: node.title, children: node.children.map(toPlain) };
+    const firstLine = node.body.find(line => line.trim() !== '')?.trim();
+    const preview = firstLine && firstLine.length > PREVIEW_MAX ? `${firstLine.slice(0, PREVIEW_MAX - 1).trimEnd()}…` : firstLine;
+    return { id: node.id, title: node.title, kind: node.kind, preview, children: node.children.map(toPlain) };
 }
 
 function indexNodes(node: MdNode, into: Map<string, MdNode>): void {
@@ -189,27 +273,43 @@ function indexNodes(node: MdNode, into: Map<string, MdNode>): void {
 
 /**
  * Rebuild the tree from the editor's current structure. Titles, order and
- * nesting come from the editor; bodies and gaps come from the existing nodes
- * matched by id. Unknown ids are new nodes.
+ * nesting come from the editor; bodies, gaps and markers come from the
+ * existing nodes matched by id. Unknown ids are new nodes. A node under a
+ * list item is a list item; under a heading, list items are written before
+ * sub-headings.
  */
 export function reconcile(tree: MdTree, editorRoot: PlainNode): MdTree {
     const known = new Map<string, MdNode>();
     indexNodes(tree.root, known);
 
-    const rebuild = (plain: PlainNode): MdNode => {
+    const rebuild = (plain: PlainNode, parent: MdNode | undefined, previousSibling: MdNode | undefined): MdNode => {
         const existing = known.get(plain.id);
-        return {
+        const kind: NodeKind = parent?.kind === 'list' ? 'list' : existing?.kind ?? plain.kind ?? 'heading';
+        const node: MdNode = {
             id: plain.id,
             title: plain.title,
+            kind,
+            marker: kind === 'list' ? existing?.marker ?? previousSibling?.marker ?? parent?.marker ?? '-' : undefined,
+            indent: kind === 'list' && existing?.kind === 'list' ? existing.indent : undefined,
             gapBefore: existing?.gapBefore,
             gapFirstChild: existing?.gapFirstChild,
             body: existing ? existing.body : [],
-            children: plain.children.map(rebuild),
+            children: [],
         };
+        let previous: MdNode | undefined;
+        node.children = plain.children.map(child => {
+            const built = rebuild(child, node, previous);
+            previous = built;
+            return built;
+        });
+        if (kind === 'heading') {
+            node.children = [...node.children.filter(c => c.kind === 'list'), ...node.children.filter(c => c.kind === 'heading')];
+        }
+        return node;
     };
 
-    const rebuilt = rebuild(editorRoot);
     const singleTop = tree.root.children.length === 1 && tree.root.children[0].id === editorRoot.id;
+    const rebuilt = rebuild(editorRoot, singleTop ? tree.root : undefined, undefined);
     const root: MdNode = singleTop
         ? { ...tree.root, children: [rebuilt] }
         : { ...tree.root, children: rebuilt.children };
